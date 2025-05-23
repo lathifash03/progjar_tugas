@@ -18,7 +18,7 @@ class ProcessTheClient(threading.Thread):
 
     def run(self):
         while True:
-            data = self.connection.recv(32)
+            data = self.connection.recv(1024)
             if data:
                 d = data.decode()
                 hasil = fp.proses_string(d)
@@ -51,10 +51,9 @@ class Server(threading.Thread):
 
 
 def main():
-    svr = Server(ipaddress='0.0.0.0',port=6666)
+    svr = Server(ipaddress='0.0.0.0',port=7777)
     svr.start()
 
 
 if __name__ == "__main__":
     main()
-

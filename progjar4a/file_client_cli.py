@@ -2,70 +2,119 @@ import socket
 import json
 import base64
 import logging
+import argparse
 
-server_address=('0.0.0.0',7777)
+# Konfigurasi logging
+logging.basicConfig(level=logging.INFO)
 
-def send_command(command_str=""):
-    global server_address
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect(server_address)
-    logging.warning(f"connecting to {server_address}")
+def send_command(command_str, server_address, timeout=10):
     try:
-        logging.warning(f"sending message ")
-        sock.sendall(command_str.encode())
-        # Look for the response, waiting until socket is done (no more data)
-        data_received="" #empty string
-        while True:
-            #socket does not receive all data at once, data comes in part, need to be concatenated at the end of process
-            data = sock.recv(16)
-            if data:
-                #data is not empty, concat with previous content
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(timeout)
+            sock.connect(server_address)
+            logging.info(f"Mengirim perintah: {command_str[:50]}...")  # Log potongan perintah
+            sock.sendall(command_str.encode())
+            
+            data_received = ""
+            while True:
+                data = sock.recv(8192)  # Buffer lebih besar untuk file besar
+                if not data:
+                    break
                 data_received += data.decode()
                 if "\r\n\r\n" in data_received:
                     break
-            else:
-                # no more data, stop the process by break
-                break
-        # at this point, data_received (string) will contain all data coming from the socket
-        # to be able to use the data_received as a dict, need to load it using json.loads()
-        hasil = json.loads(data_received)
-        logging.warning("data received from server:")
-        return hasil
-    except:
-        logging.warning("error during data receiving")
-        return False
+            
+            return json.loads(data_received)
+    except Exception as e:
+        logging.error(f"Error: {str(e)}")
+        return {"status": "ERROR", "data": str(e)}
 
-
-def remote_list():
-    command_str=f"LIST"
-    hasil = send_command(command_str)
-    if (hasil['status']=='OK'):
-        print("daftar file : ")
-        for nmfile in hasil['data']:
-            print(f"- {nmfile}")
-        return True
+def remote_list(server_address):
+    response = send_command("LIST", server_address)
+    if response['status'] == 'OK':
+        print("\nDaftar file di server:")
+        for file in response['data']:
+            print(f"- {file}")
     else:
-        print("Gagal")
-        return False
+        print(f"\nError: {response['data']}")
 
-def remote_get(filename=""):
-    command_str=f"GET {filename}"
-    hasil = send_command(command_str)
-    if (hasil['status']=='OK'):
-        #proses file dalam bentuk base64 ke bentuk bytes
-        namafile= hasil['data_namafile']
-        isifile = base64.b64decode(hasil['data_file'])
-        fp = open(namafile,'wb+')
-        fp.write(isifile)
-        fp.close()
-        return True
+def remote_get(filename, server_address):
+    response = send_command(f"GET {filename}", server_address)
+    if response['status'] == 'OK':
+        try:
+            with open(filename, 'wb') as f:
+                f.write(base64.b64decode(response['data_file']))
+            print(f"\nFile '{filename}' berhasil didownload.")
+        except Exception as e:
+            print(f"\nError menyimpan file: {str(e)}")
     else:
-        print("Gagal")
-        return False
+        print(f"\nError: {response['data']}")
 
+def remote_upload(filename, server_address):
+    try:
+        with open(filename, 'rb') as f:
+            file_data = base64.b64encode(f.read()).decode()
+        response = send_command(f"UPLOAD {filename} {file_data}", server_address)
+        if response['status'] == 'OK':
+            print(f"\n{response['data']}")
+        else:
+            print(f"\nError: {response['data']}")
+    except FileNotFoundError:
+        print(f"\nError: File '{filename}' tidak ditemukan di lokal.")
+    except Exception as e:
+        print(f"\nError: {str(e)}")
 
-if __name__=='__main__':
-    server_address=('172.16.16.101',6666)
-    remote_list()
-    remote_get('donalbebek.jpg')
+def remote_delete(filename, server_address):
+    response = send_command(f"DELETE {filename}", server_address)
+    if response['status'] == 'OK':
+        print(f"\n{response['data']}")
+    else:
+        print(f"\nError: {response['data']}")
 
+def main():
+    parser = argparse.ArgumentParser(description="File Client CLI")
+    parser.add_argument('--host', default='172.16.16.101', help="Alamat IP server")
+    parser.add_argument('--port', type=int, default=7777, help="Port server")
+    subparsers = parser.add_subparsers(dest='command', required=True)
+
+    # Subcommand: list
+    list_parser = subparsers.add_parser('list', help='List file di server')
+
+    # Subcommand: get
+    get_parser = subparsers.add_parser('get', help='Download file dari server')
+    get_parser.add_argument('filename', help='Nama file yang akan didownload')
+
+    # Subcommand: upload
+    upload_parser = subparsers.add_parser('upload', help='Upload file ke server')
+    upload_parser.add_argument('filename', help='Nama file yang akan diupload')
+
+    # Subcommand: delete
+    delete_parser = subparsers.add_parser('delete', help='Hapus file di server')
+    delete_parser.add_argument('filename', help='Nama file yang akan dihapus')
+
+    args = parser.parse_args()
+    server_address = (args.host, args.port)
+
+    if args.command == 'list':
+        remote_list(server_address)
+    elif args.command == 'get':
+        remote_get(args.filename, server_address)
+    elif args.command == 'upload':
+        remote_upload(args.filename, server_address)
+    elif args.command == 'delete':
+        remote_delete(args.filename, server_address)
+
+if __name__ == '__main__':
+    main()
+
+    # List file
+# python file_client_cli.py list --host 172.16.16.101 --port 7777
+
+# Download file
+# python file_client_cli.py get donalbebek.jpg --host 172.16.16.101
+
+# Upload file
+# python file_client_cli.py upload tugas3.txt --port 7777
+
+# Delete file
+# python file_client_cli.py delete tugas3.txt
