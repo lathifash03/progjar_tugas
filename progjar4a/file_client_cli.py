@@ -2,119 +2,103 @@ import socket
 import json
 import base64
 import logging
-import argparse
 
-# Konfigurasi logging
-logging.basicConfig(level=logging.INFO)
+server_address = ('0.0.0.0', 7777)
 
-def send_command(command_str, server_address, timeout=10):
+def send_command(command_str=""):
+    global server_address
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect(server_address)
+    logging.warning(f"connecting to {server_address}")
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(timeout)
-            sock.connect(server_address)
-            logging.info(f"Mengirim perintah: {command_str[:50]}...")  # Log potongan perintah
-            sock.sendall(command_str.encode())
-            
-            data_received = ""
-            while True:
-                data = sock.recv(8192)  # Buffer lebih besar untuk file besar
-                if not data:
-                    break
+        logging.warning(f"sending message")
+        sock.sendall(command_str.encode())
+        data_received = ""
+        while True:
+            data = sock.recv(1024)
+            if data:
                 data_received += data.decode()
                 if "\r\n\r\n" in data_received:
                     break
-            
-            return json.loads(data_received)
-    except Exception as e:
-        logging.error(f"Error: {str(e)}")
-        return {"status": "ERROR", "data": str(e)}
+            else:
+                break
+        hasil = json.loads(data_received)
+        logging.warning("data received from server:")
+        return hasil
+    except:
+        logging.warning("error during data receiving")
+        return False
 
-def remote_list(server_address):
-    response = send_command("LIST", server_address)
-    if response['status'] == 'OK':
-        print("\nDaftar file di server:")
-        for file in response['data']:
-            print(f"- {file}")
+def remote_list():
+    command_str = "LIST"
+    hasil = send_command(command_str)
+    if hasil['status'] == 'OK':
+        print("Daftar file:")
+        for nmfile in hasil['data']:
+            print(f"- {nmfile}")
+        return True
     else:
-        print(f"\nError: {response['data']}")
+        print("Gagal")
+        return False
 
-def remote_get(filename, server_address):
-    response = send_command(f"GET {filename}", server_address)
-    if response['status'] == 'OK':
-        try:
-            with open(filename, 'wb') as f:
-                f.write(base64.b64decode(response['data_file']))
-            print(f"\nFile '{filename}' berhasil didownload.")
-        except Exception as e:
-            print(f"\nError menyimpan file: {str(e)}")
+def remote_get(filename=""):
+    command_str = f"GET {filename}"
+    hasil = send_command(command_str)
+    if hasil['status'] == 'OK':
+        namafile = hasil['data_namafile']
+        isifile = base64.b64decode(hasil['data_file'])
+        with open(namafile, 'wb+') as fp:
+            fp.write(isifile)
+        return True
     else:
-        print(f"\nError: {response['data']}")
+        print("Gagal")
+        return False
 
-def remote_upload(filename, server_address):
+def remote_upload(filename=""):
     try:
-        with open(filename, 'rb') as f:
-            file_data = base64.b64encode(f.read()).decode()
-        response = send_command(f"UPLOAD {filename} {file_data}", server_address)
-        if response['status'] == 'OK':
-            print(f"\n{response['data']}")
+        with open(filename, 'rb') as fp:
+            isifile = base64.b64encode(fp.read()).decode()
+        command_str = f"UPLOAD {filename} {isifile}"
+        hasil = send_command(command_str)
+        if hasil['status'] == 'OK':
+            print(hasil['data'])
+            return True
         else:
-            print(f"\nError: {response['data']}")
+            print("Gagal")
+            return False
     except FileNotFoundError:
-        print(f"\nError: File '{filename}' tidak ditemukan di lokal.")
-    except Exception as e:
-        print(f"\nError: {str(e)}")
+        print(f"File {filename} tidak ditemukan")
+        return False
 
-def remote_delete(filename, server_address):
-    response = send_command(f"DELETE {filename}", server_address)
-    if response['status'] == 'OK':
-        print(f"\n{response['data']}")
+def remote_delete(filename=""):
+    command_str = f"DELETE {filename}"
+    hasil = send_command(command_str)
+    if hasil['status'] == 'OK':
+        print(hasil['data'])
+        return True
     else:
-        print(f"\nError: {response['data']}")
-
-def main():
-    parser = argparse.ArgumentParser(description="File Client CLI")
-    parser.add_argument('--host', default='172.16.16.101', help="Alamat IP server")
-    parser.add_argument('--port', type=int, default=7777, help="Port server")
-    subparsers = parser.add_subparsers(dest='command', required=True)
-
-    # Subcommand: list
-    list_parser = subparsers.add_parser('list', help='List file di server')
-
-    # Subcommand: get
-    get_parser = subparsers.add_parser('get', help='Download file dari server')
-    get_parser.add_argument('filename', help='Nama file yang akan didownload')
-
-    # Subcommand: upload
-    upload_parser = subparsers.add_parser('upload', help='Upload file ke server')
-    upload_parser.add_argument('filename', help='Nama file yang akan diupload')
-
-    # Subcommand: delete
-    delete_parser = subparsers.add_parser('delete', help='Hapus file di server')
-    delete_parser.add_argument('filename', help='Nama file yang akan dihapus')
-
-    args = parser.parse_args()
-    server_address = (args.host, args.port)
-
-    if args.command == 'list':
-        remote_list(server_address)
-    elif args.command == 'get':
-        remote_get(args.filename, server_address)
-    elif args.command == 'upload':
-        remote_upload(args.filename, server_address)
-    elif args.command == 'delete':
-        remote_delete(args.filename, server_address)
+        print("Gagal")
+        return False
 
 if __name__ == '__main__':
-    main()
-
-    # List file
-# python file_client_cli.py list --host 172.16.16.101 --port 7777
-
-# Download file
-# python file_client_cli.py get donalbebek.jpg --host 172.16.16.101
-
-# Upload file
-# python file_client_cli.py upload tugas3.txt --port 7777
-
-# Delete file
-# python file_client_cli.py delete tugas3.txt
+    server_address = ('172.16.16.101', 7777)
+    print("=== Tes LIST ===")
+    remote_list()
+    
+    print("\n=== Tes GET ===")
+    remote_get('donalbebek.jpg')
+    
+    print("\n=== Tes LIST setelah GET ===")
+    remote_list()
+    
+    print("\n=== Tes UPLOAD ===")
+    remote_upload('tugas3.txt')
+    
+    print("\n=== Tes LIST setelah UPLOAD ===")
+    remote_list()
+    
+    print("\n=== Tes DELETE ===")
+    remote_delete('tugas3.txt')
+    
+    print("\n=== Tes LIST setelah DELETE ===")
+    remote_list()
